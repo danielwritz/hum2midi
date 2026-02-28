@@ -2,8 +2,6 @@ const holdRecordBtn = document.getElementById('holdRecord');
 const liveFreqEl = document.getElementById('liveFreq');
 const liveNoteEl = document.getElementById('liveNote');
 const recordedSecEl = document.getElementById('recordedSec');
-const trimStartEl = document.getElementById('trimStart');
-const trimEndEl = document.getElementById('trimEnd');
 const trimStartLabelEl = document.getElementById('trimStartLabel');
 const trimEndLabelEl = document.getElementById('trimEndLabel');
 const convertBtn = document.getElementById('convertBtn');
@@ -14,6 +12,8 @@ const stopBtn = document.getElementById('stopBtn');
 const octaveUpBtn = document.getElementById('octaveUpBtn');
 const octaveDownBtn = document.getElementById('octaveDownBtn');
 const exportMidiBtn = document.getElementById('exportMidiBtn');
+const freqMap = document.getElementById('freqMap');
+const freqCtx = freqMap.getContext('2d');
 const roll = document.getElementById('roll');
 const ctx = roll.getContext('2d');
 
@@ -30,12 +30,14 @@ const state = {
   pitchFrames: [],
   notes: [],
   timelineSec: 8,
+  trimStart: 0,
+  trimEnd: 0,
   minMidi: 36,
   maxMidi: 84,
   selectedNote: null,
   dragMode: null,
+  dragCanvas: null,
   dragOffsetX: 0,
-  dragOffsetMidi: 0,
   playingNodes: [],
   playingTimeouts: [],
 };
@@ -56,6 +58,31 @@ function midiToHz(midi) {
 
 function clamp(v, min, max) {
   return Math.max(min, Math.min(max, v));
+}
+
+function canvasPos(canvas, evt) {
+  const rect = canvas.getBoundingClientRect();
+  return {
+    x: ((evt.clientX - rect.left) / rect.width) * canvas.width,
+    y: ((evt.clientY - rect.top) / rect.height) * canvas.height,
+  };
+}
+
+function trimMax() {
+  return Math.max(0.01, state.recordingTotalSec, state.timelineSec);
+}
+
+function updateTrimUI() {
+  const max = trimMax();
+  state.trimStart = clamp(state.trimStart, 0, max);
+  state.trimEnd = clamp(state.trimEnd, 0, max);
+  if (state.trimEnd < state.trimStart) state.trimEnd = state.trimStart;
+
+  trimStartLabelEl.textContent = `Start ${state.trimStart.toFixed(2)}s`;
+  trimEndLabelEl.textContent = `End ${state.trimEnd.toFixed(2)}s`;
+
+  drawFreqMap();
+  drawRoll();
 }
 
 function median(values) {
@@ -171,18 +198,6 @@ function pitchLoop() {
   state.rafId = requestAnimationFrame(pitchLoop);
 }
 
-function updateTrimUI() {
-  const max = Math.max(0, state.recordingTotalSec);
-  trimStartEl.max = String(max);
-  trimEndEl.max = String(max);
-
-  if (Number(trimEndEl.value) > max) trimEndEl.value = String(max);
-  if (Number(trimStartEl.value) > Number(trimEndEl.value)) trimStartEl.value = trimEndEl.value;
-
-  trimStartLabelEl.textContent = `${Number(trimStartEl.value).toFixed(2)}s`;
-  trimEndLabelEl.textContent = `${Number(trimEndEl.value).toFixed(2)}s`;
-}
-
 function startRecording() {
   if (state.recording) return;
   state.recording = true;
@@ -195,8 +210,8 @@ function stopRecording() {
   state.recording = false;
   holdRecordBtn.classList.remove('recording');
 
-  trimStartEl.value = '0';
-  trimEndEl.value = String(state.recordingTotalSec);
+  state.trimStart = 0;
+  state.trimEnd = state.recordingTotalSec;
   updateTrimUI();
 }
 
@@ -220,23 +235,9 @@ holdRecordBtn.addEventListener('touchstart', (e) => {
 window.addEventListener('mouseup', stopRecording);
 window.addEventListener('touchend', stopRecording);
 
-trimStartEl.addEventListener('input', () => {
-  if (Number(trimStartEl.value) > Number(trimEndEl.value)) {
-    trimStartEl.value = trimEndEl.value;
-  }
-  updateTrimUI();
-});
-
-trimEndEl.addEventListener('input', () => {
-  if (Number(trimEndEl.value) < Number(trimStartEl.value)) {
-    trimEndEl.value = trimStartEl.value;
-  }
-  updateTrimUI();
-});
-
 function convertFramesToNotes() {
-  const start = Number(trimStartEl.value);
-  const end = Number(trimEndEl.value);
+  const start = state.trimStart;
+  const end = state.trimEnd;
   if (end <= start) {
     alert('Set a valid trim range first.');
     return;
@@ -289,6 +290,8 @@ function convertFramesToNotes() {
 
   state.notes = notes;
   state.timelineSec = Math.max(8, end - start + 1);
+  state.trimStart = 0;
+  state.trimEnd = Math.max(0.2, end - start);
   drawRoll();
 }
 
@@ -313,6 +316,25 @@ function stopPlayback() {
   state.playingNodes.length = 0;
 }
 
+function getTrimmedNotes() {
+  const start = state.trimStart;
+  const end = state.trimEnd;
+  return state.notes
+    .map((n) => {
+      const nStart = n.start;
+      const nEnd = n.start + n.duration;
+      if (nEnd <= start || nStart >= end) return null;
+      const clippedStart = Math.max(start, nStart);
+      const clippedEnd = Math.min(end, nEnd);
+      return {
+        ...n,
+        start: clippedStart - start,
+        duration: Math.max(0.03, clippedEnd - clippedStart),
+      };
+    })
+    .filter(Boolean);
+}
+
 async function playNotes() {
   if (!state.notes.length) return;
   await ensureAudioReady();
@@ -323,7 +345,7 @@ async function playNotes() {
   const now = state.audioCtx.currentTime + 0.05;
   const wave = waveformEl.value;
 
-  for (const note of state.notes) {
+  for (const note of getTrimmedNotes()) {
     const osc = state.audioCtx.createOscillator();
     const gain = state.audioCtx.createGain();
     osc.type = wave;
@@ -369,7 +391,7 @@ function exportMidi() {
   const events = [];
   events.push({ tick: 0, bytes: [0xff, 0x51, 0x03, (usPerQuarter >> 16) & 0xff, (usPerQuarter >> 8) & 0xff, usPerQuarter & 0xff] });
 
-  for (const n of state.notes) {
+  for (const n of getTrimmedNotes()) {
     const startTick = Math.floor(n.start * (ppq * bpm / 60));
     const endTick = Math.max(startTick + 1, Math.floor((n.start + n.duration) * (ppq * bpm / 60)));
     events.push({ tick: startTick, bytes: [0x90, n.midi, clamp(n.velocity, 1, 127)] });
@@ -415,6 +437,99 @@ function exportMidi() {
 }
 
 exportMidiBtn.addEventListener('click', exportMidi);
+
+function freqGeometry() {
+  const left = 56;
+  const top = 14;
+  const width = freqMap.width - left - 10;
+  const height = freqMap.height - top - 22;
+  return { left, top, width, height };
+}
+
+function timeToFreqX(sec) {
+  const g = freqGeometry();
+  return g.left + (sec / trimMax()) * g.width;
+}
+
+function freqXToTime(x) {
+  const g = freqGeometry();
+  return clamp(((x - g.left) / g.width) * trimMax(), 0, trimMax());
+}
+
+function drawTrimOverlay(drawCtx, xStart, xEnd, top, height) {
+  drawCtx.fillStyle = 'rgba(6,10,16,0.56)';
+  drawCtx.fillRect(0, top, xStart, height);
+  drawCtx.fillRect(xEnd, top, drawCtx.canvas.width - xEnd, height);
+
+  drawCtx.strokeStyle = '#ffcb6b';
+  drawCtx.lineWidth = 2;
+  drawCtx.beginPath();
+  drawCtx.moveTo(xStart, top);
+  drawCtx.lineTo(xStart, top + height);
+  drawCtx.moveTo(xEnd, top);
+  drawCtx.lineTo(xEnd, top + height);
+  drawCtx.stroke();
+}
+
+function drawFreqMap() {
+  const g = freqGeometry();
+  const maxT = trimMax();
+
+  freqCtx.clearRect(0, 0, freqMap.width, freqMap.height);
+  freqCtx.fillStyle = '#0f141b';
+  freqCtx.fillRect(g.left, g.top, g.width, g.height);
+
+  const minHz = 60;
+  const maxHz = 1200;
+
+  for (let hz = 100; hz <= 1000; hz += 100) {
+    const yNorm = (Math.log(hz) - Math.log(minHz)) / (Math.log(maxHz) - Math.log(minHz));
+    const y = g.top + g.height - yNorm * g.height;
+    freqCtx.strokeStyle = 'rgba(53,66,82,0.5)';
+    freqCtx.beginPath();
+    freqCtx.moveTo(g.left, y);
+    freqCtx.lineTo(g.left + g.width, y);
+    freqCtx.stroke();
+
+    if (hz % 200 === 0) {
+      freqCtx.fillStyle = '#8ea0b8';
+      freqCtx.font = '10px sans-serif';
+      freqCtx.fillText(`${hz}Hz`, 4, y + 3);
+    }
+  }
+
+  for (let sec = 0; sec <= Math.floor(maxT); sec++) {
+    const x = g.left + (sec / maxT) * g.width;
+    freqCtx.strokeStyle = '#2d3a4b';
+    freqCtx.beginPath();
+    freqCtx.moveTo(x, g.top);
+    freqCtx.lineTo(x, g.top + g.height);
+    freqCtx.stroke();
+    freqCtx.fillStyle = '#8ea0b8';
+    freqCtx.font = '10px sans-serif';
+    freqCtx.fillText(`${sec}s`, x + 2, g.top + g.height + 12);
+  }
+
+  const pts = state.pitchFrames.filter((f) => f.freq >= minHz && f.freq <= maxHz);
+  if (pts.length > 1) {
+    freqCtx.strokeStyle = '#58a6ff';
+    freqCtx.lineWidth = 1.3;
+    freqCtx.beginPath();
+    for (let i = 0; i < pts.length; i++) {
+      const p = pts[i];
+      const x = g.left + (p.t / maxT) * g.width;
+      const yNorm = (Math.log(p.freq) - Math.log(minHz)) / (Math.log(maxHz) - Math.log(minHz));
+      const y = g.top + g.height - yNorm * g.height;
+      if (i === 0) freqCtx.moveTo(x, y);
+      else freqCtx.lineTo(x, y);
+    }
+    freqCtx.stroke();
+  }
+
+  const xStart = timeToFreqX(state.trimStart);
+  const xEnd = timeToFreqX(state.trimEnd);
+  drawTrimOverlay(freqCtx, xStart, xEnd, g.top, g.height);
+}
 
 function gridGeometry() {
   const left = 70;
@@ -487,20 +602,67 @@ function drawRoll() {
     ctx.fillStyle = '#d4e7ff';
     ctx.fillRect(r.x + r.w - 3, r.y + 1, 3, Math.max(2, r.h - 2));
   });
+
+  const xStart = g.left + (state.trimStart / trimMax()) * g.width;
+  const xEnd = g.left + (state.trimEnd / trimMax()) * g.width;
+  drawTrimOverlay(ctx, xStart, xEnd, g.top, g.height);
 }
 
-function mousePos(evt) {
-  const rect = roll.getBoundingClientRect();
+function trimHandleHit(canvas, x) {
+  if (canvas === freqMap) {
+    return {
+      nearStart: Math.abs(x - timeToFreqX(state.trimStart)) <= 8,
+      nearEnd: Math.abs(x - timeToFreqX(state.trimEnd)) <= 8,
+    };
+  }
+
+  const g = gridGeometry();
+  const xStart = g.left + (state.trimStart / trimMax()) * g.width;
+  const xEnd = g.left + (state.trimEnd / trimMax()) * g.width;
   return {
-    x: ((evt.clientX - rect.left) / rect.width) * roll.width,
-    y: ((evt.clientY - rect.top) / rect.height) * roll.height,
+    nearStart: Math.abs(x - xStart) <= 8,
+    nearEnd: Math.abs(x - xEnd) <= 8,
   };
 }
 
+freqMap.addEventListener('mousedown', (evt) => {
+  const p = canvasPos(freqMap, evt);
+  const hit = trimHandleHit(freqMap, p.x);
+  if (hit.nearStart) {
+    state.dragMode = 'trimStart';
+    state.dragCanvas = freqMap;
+  } else if (hit.nearEnd) {
+    state.dragMode = 'trimEnd';
+    state.dragCanvas = freqMap;
+  } else {
+    const t = freqXToTime(p.x);
+    if (Math.abs(t - state.trimStart) < Math.abs(t - state.trimEnd)) {
+      state.trimStart = Math.min(t, state.trimEnd);
+    } else {
+      state.trimEnd = Math.max(t, state.trimStart);
+    }
+    updateTrimUI();
+  }
+});
+
 roll.addEventListener('mousedown', (evt) => {
-  const p = mousePos(evt);
+  const p = canvasPos(roll, evt);
+  const trimHit = trimHandleHit(roll, p.x);
+
+  if (trimHit.nearStart) {
+    state.dragMode = 'trimStart';
+    state.dragCanvas = roll;
+    return;
+  }
+  if (trimHit.nearEnd) {
+    state.dragMode = 'trimEnd';
+    state.dragCanvas = roll;
+    return;
+  }
+
   state.selectedNote = null;
   state.dragMode = null;
+  state.dragCanvas = roll;
 
   for (let i = state.notes.length - 1; i >= 0; i--) {
     const r = noteRect(state.notes[i]);
@@ -509,7 +671,6 @@ roll.addEventListener('mousedown', (evt) => {
       const nearRightEdge = p.x > r.x + r.w - 8;
       state.dragMode = nearRightEdge ? 'resize' : 'move';
       state.dragOffsetX = p.x - r.x;
-      state.dragOffsetMidi = state.notes[i].midi;
       break;
     }
   }
@@ -518,8 +679,27 @@ roll.addEventListener('mousedown', (evt) => {
 });
 
 window.addEventListener('mousemove', (evt) => {
-  if (state.selectedNote === null || !state.dragMode) return;
-  const p = mousePos(evt);
+  if (!state.dragMode) return;
+
+  if (state.dragMode === 'trimStart' || state.dragMode === 'trimEnd') {
+    const canvas = state.dragCanvas || roll;
+    const p = canvasPos(canvas, evt);
+    const t = canvas === freqMap
+      ? freqXToTime(p.x)
+      : clamp(((p.x - gridGeometry().left) / gridGeometry().width) * trimMax(), 0, trimMax());
+
+    if (state.dragMode === 'trimStart') {
+      state.trimStart = Math.min(t, state.trimEnd);
+    } else {
+      state.trimEnd = Math.max(t, state.trimStart);
+    }
+    updateTrimUI();
+    return;
+  }
+
+  if (state.selectedNote === null) return;
+
+  const p = canvasPos(roll, evt);
   const note = state.notes[state.selectedNote];
   const g = gridGeometry();
   const rowH = g.height / (state.maxMidi - state.minMidi + 1);
@@ -543,8 +723,11 @@ window.addEventListener('mousemove', (evt) => {
 
 window.addEventListener('mouseup', () => {
   state.dragMode = null;
+  state.dragCanvas = null;
 });
 
 state.timelineSec = 8;
+state.trimStart = 0;
+state.trimEnd = state.timelineSec;
 drawRoll();
 updateTrimUI();

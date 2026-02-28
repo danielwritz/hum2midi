@@ -24,11 +24,10 @@
 
     <section class="panel trim-panel">
       <h2>Trim</h2>
-      <label>Start <input id="trimStart" type="range" min="0" max="0" value="0" step="0.01" /></label>
-      <label>End <input id="trimEnd" type="range" min="0" max="0" value="0" step="0.01" /></label>
+      <canvas id="freqMap" width="1160" height="220"></canvas>
       <div class="trim-values">
-        <span id="trimStartLabel">0.00s</span>
-        <span id="trimEndLabel">0.00s</span>
+        <span id="trimStartLabel">Start 0.00s</span>
+        <span id="trimEndLabel">End 0.00s</span>
       </div>
       <div class="row">
         <button id="convertBtn">Convert To Notes</button>

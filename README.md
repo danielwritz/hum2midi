@@ -11,7 +11,8 @@ Turn humming/whistling into editable MIDI.
 ## V1 Scope (POC)
 - Hold button to record microphone pitch
 - Live frequency + note display
-- Trim start/end after recording
+- Trim start/end directly on a frequency map (drag handles)
+- Trim start/end directly in the piano roll (same linked handles)
 - Convert trimmed audio-pitch frames into quantized note events
 - Piano roll with direct note drag/move and resize
 - Octave shift controls

@@ -116,3 +116,14 @@ button:hover { border-color: var(--accent); }
   display: block;
   margin-bottom: 10px;
 }
+
+#freqMap {
+  width: 100%;
+  max-width: 1160px;
+  height: auto;
+  background: #0d1218;
+  border: 1px solid #2f3a47;
+  border-radius: 8px;
+  display: block;
+  margin-bottom: 10px;
+}

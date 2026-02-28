@@ -6,9 +6,9 @@ Capture a sung/hummed melody quickly and convert it into editable MIDI with mini
 ## Primary User Flow
 1. User holds record button and hums/whistles a melody.
 2. App displays live frequency and note estimate.
-3. User trims start/end to isolate phrase.
+3. User trims start/end on a frequency map to isolate phrase.
 4. App converts trimmed pitch frames to quantized notes.
-5. Notes appear in a piano-roll editor.
+5. Notes appear in a piano-roll editor with the same trim handles available.
 6. User edits note positions/durations/pitch.
 7. User chooses instrument, plays back, exports MIDI.
 
@@ -27,7 +27,8 @@ Capture a sung/hummed melody quickly and convert it into editable MIDI with mini
 - Store pitch frames as `{ t, freq, midi }`
 
 ### Trim + Note Conversion
-- Trim sliders define active range
+- Frequency-map trim handles define active range
+- Piano-roll trim handles mirror and update the same active range
 - Partition trimmed region into quantization buckets based on BPM
 - Median MIDI per bucket
 - Merge contiguous buckets of same pitch into notes
