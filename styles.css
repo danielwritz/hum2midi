@@ -1,0 +1,118 @@
+:root {
+  --bg: #0d1117;
+  --panel: #161b22;
+  --text: #e6edf3;
+  --muted: #9da7b2;
+  --accent: #58a6ff;
+  --record: #ef5350;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: Inter, Segoe UI, system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.app {
+  max-width: 1220px;
+  margin: 0 auto;
+  padding: 20px;
+  display: grid;
+  gap: 14px;
+}
+
+header h1 { margin: 0; }
+header p { margin: 4px 0 0; color: var(--muted); }
+
+.panel {
+  background: var(--panel);
+  border: 1px solid #2a313b;
+  border-radius: 10px;
+  padding: 12px;
+}
+
+.record-panel {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  gap: 12px;
+  align-items: center;
+}
+
+.record-btn {
+  height: 52px;
+  border: none;
+  border-radius: 8px;
+  background: var(--record);
+  color: white;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.record-btn.recording {
+  filter: brightness(1.2);
+  box-shadow: 0 0 0 2px #ff8a80 inset;
+}
+
+.live-meters {
+  display: grid;
+  gap: 4px;
+  color: var(--muted);
+}
+
+h2 {
+  margin: 0 0 10px;
+  font-size: 16px;
+}
+
+label {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+input[type="range"],
+input[type="number"],
+select,
+button {
+  font: inherit;
+}
+
+input[type="number"],
+select,
+button {
+  background: #0f141b;
+  color: var(--text);
+  border: 1px solid #2f3a47;
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+
+button { cursor: pointer; }
+button:hover { border-color: var(--accent); }
+
+.trim-values {
+  display: flex;
+  justify-content: space-between;
+  color: var(--muted);
+  margin-bottom: 10px;
+}
+
+.row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+#roll {
+  width: 100%;
+  max-width: 1160px;
+  height: auto;
+  background: #0d1218;
+  border: 1px solid #2f3a47;
+  border-radius: 8px;
+  display: block;
+  margin-bottom: 10px;
+}

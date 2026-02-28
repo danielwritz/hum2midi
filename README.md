@@ -1,0 +1,37 @@
+# hum2midi
+
+Turn humming/whistling into editable MIDI.
+
+## Vision
+- Press-and-hold capture for melody ideas
+- Fast trim + conversion flow
+- Lightweight piano-roll editing
+- Immediate playback and MIDI export
+
+## V1 Scope (POC)
+- Hold button to record microphone pitch
+- Live frequency + note display
+- Trim start/end after recording
+- Convert trimmed audio-pitch frames into quantized note events
+- Piano roll with direct note drag/move and resize
+- Octave shift controls
+- Playback with selectable oscillator instrument
+- Export to `.mid`
+
+## Run
+Open [index.html](index.html) in a browser.
+
+> Browser needs microphone permission for recording.
+
+## Files
+- [index.html](index.html) — app UI shell
+- [styles.css](styles.css) — styling
+- [app.js](app.js) — recording, conversion, editor, playback, MIDI export
+- [DESIGN.md](DESIGN.md) — product/technical blueprint
+
+## Next Steps
+- Add piano keyboard input + click-to-add note
+- Add smoothing/denoise pass before note conversion
+- Add snap grid controls (1/8, 1/16, triplets)
+- Add project save/load JSON and import MIDI
+- Add robust instrument layer (SoundFont/WebAudio samples)
