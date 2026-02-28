@@ -41,6 +41,14 @@ const state = {
   playingNodes: [],
   playingTimeouts: [],
   noiseBuffer: null,
+  playheadSec: null,
+  playheadRafId: 0,
+  playheadStartCtxTime: 0,
+  playheadDurationSec: 0,
+  previewOsc: null,
+  previewGain: null,
+  previewTargetMidi: null,
+  previewToken: 0,
 };
 
 function noteNameFromMidi(midi) {
@@ -315,6 +323,107 @@ function stopPlayback() {
     try { node.disconnect(); } catch {}
   }
   state.playingNodes.length = 0;
+  stopPlayhead();
+}
+
+function stopPlayhead() {
+  if (state.playheadRafId) cancelAnimationFrame(state.playheadRafId);
+  state.playheadRafId = 0;
+  state.playheadSec = null;
+  drawRoll();
+}
+
+function startPlayhead(durationSec, playbackStartCtxTime) {
+  if (!state.audioCtx) return;
+  if (state.playheadRafId) cancelAnimationFrame(state.playheadRafId);
+
+  state.playheadDurationSec = Math.max(0.05, durationSec);
+  state.playheadStartCtxTime = playbackStartCtxTime;
+
+  const tick = () => {
+    if (!state.audioCtx) {
+      stopPlayhead();
+      return;
+    }
+
+    const elapsed = state.audioCtx.currentTime - state.playheadStartCtxTime;
+    if (elapsed < 0) {
+      state.playheadSec = state.trimStart;
+      drawRoll();
+      state.playheadRafId = requestAnimationFrame(tick);
+      return;
+    }
+
+    if (elapsed <= state.playheadDurationSec + 0.02) {
+      state.playheadSec = state.trimStart + elapsed;
+      drawRoll();
+      state.playheadRafId = requestAnimationFrame(tick);
+      return;
+    }
+
+    stopPlayhead();
+  };
+
+  state.playheadRafId = requestAnimationFrame(tick);
+}
+
+function updatePreviewPitch(midi) {
+  state.previewTargetMidi = midi;
+  if (!state.previewOsc || !state.audioCtx) return;
+  state.previewOsc.frequency.setTargetAtTime(midiToHz(midi), state.audioCtx.currentTime, 0.012);
+}
+
+function stopNotePreview() {
+  state.previewToken += 1;
+  if (!state.previewOsc || !state.previewGain || !state.audioCtx) {
+    state.previewOsc = null;
+    state.previewGain = null;
+    state.previewTargetMidi = null;
+    return;
+  }
+
+  const now = state.audioCtx.currentTime;
+  try {
+    state.previewGain.gain.cancelScheduledValues(now);
+    state.previewGain.gain.setValueAtTime(Math.max(0.0001, state.previewGain.gain.value), now);
+    state.previewGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.05);
+    state.previewOsc.stop(now + 0.06);
+  } catch {}
+
+  state.previewOsc = null;
+  state.previewGain = null;
+  state.previewTargetMidi = null;
+}
+
+async function startNotePreview(midi) {
+  const token = ++state.previewToken;
+  state.previewTargetMidi = midi;
+
+  try {
+    await ensureAudioReady();
+    if (state.audioCtx.state === 'suspended') await state.audioCtx.resume();
+  } catch {
+    return;
+  }
+
+  if (token !== state.previewToken || !state.audioCtx) return;
+
+  stopNotePreview();
+  state.previewToken = token;
+
+  const osc = state.audioCtx.createOscillator();
+  const gain = state.audioCtx.createGain();
+  osc.type = instrumentEl.value === 'bass' ? 'square' : 'triangle';
+  osc.frequency.setValueAtTime(midiToHz(state.previewTargetMidi), state.audioCtx.currentTime);
+
+  gain.gain.setValueAtTime(0.0001, state.audioCtx.currentTime);
+  gain.gain.linearRampToValueAtTime(0.12, state.audioCtx.currentTime + 0.015);
+
+  osc.connect(gain).connect(state.audioCtx.destination);
+  osc.start();
+
+  state.previewOsc = osc;
+  state.previewGain = gain;
 }
 
 function instrumentGain(note, scale = 1) {
@@ -569,8 +678,12 @@ async function playNotes() {
 
   const now = state.audioCtx.currentTime + 0.05;
   const instrument = instrumentEl.value;
+  const trimmedNotes = getTrimmedNotes();
+  if (!trimmedNotes.length) return;
+  const playbackDuration = Math.max(0.05, ...trimmedNotes.map((n) => n.start + n.duration));
+  startPlayhead(playbackDuration, now);
 
-  for (const note of getTrimmedNotes()) {
+  for (const note of trimmedNotes) {
     scheduleInstrumentNote(note, now, instrument);
   }
 }
@@ -818,6 +931,22 @@ function drawRoll() {
   const xStart = g.left + (state.trimStart / trimMax()) * g.width;
   const xEnd = g.left + (state.trimEnd / trimMax()) * g.width;
   drawTrimOverlay(ctx, xStart, xEnd, g.top, g.height);
+
+  if (state.playheadSec !== null) {
+    const t = clamp(state.playheadSec, state.trimStart, state.trimEnd);
+    const x = g.left + (t / trimMax()) * g.width;
+    ctx.strokeStyle = '#79c0ff';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(x, g.top);
+    ctx.lineTo(x, g.top + g.height);
+    ctx.stroke();
+
+    ctx.fillStyle = '#79c0ff';
+    ctx.font = '11px sans-serif';
+    const elapsed = Math.max(0, t - state.trimStart);
+    ctx.fillText(`Play ${elapsed.toFixed(2)}s`, Math.min(x + 6, g.left + g.width - 72), g.top + 14);
+  }
 }
 
 function trimHandleHit(canvas, x) {
@@ -883,6 +1012,7 @@ roll.addEventListener('mousedown', (evt) => {
       const nearRightEdge = p.x > r.x + r.w - 8;
       state.dragMode = nearRightEdge ? 'resize' : 'move';
       state.dragOffsetX = p.x - r.x;
+      startNotePreview(state.notes[i].midi);
       break;
     }
   }
@@ -922,12 +1052,14 @@ window.addEventListener('mousemove', (evt) => {
 
     const row = Math.floor((p.y - g.top) / rowH);
     note.midi = clamp(state.maxMidi - row, state.minMidi, state.maxMidi);
+    updatePreviewPitch(note.midi);
   }
 
   if (state.dragMode === 'resize') {
     const noteStartX = g.left + (note.start / state.timelineSec) * g.width;
     const wNorm = clamp((p.x - noteStartX) / g.width, 0.003, 1);
     note.duration = Math.max(0.05, wNorm * state.timelineSec);
+    updatePreviewPitch(note.midi);
   }
 
   drawRoll();
@@ -936,7 +1068,10 @@ window.addEventListener('mousemove', (evt) => {
 window.addEventListener('mouseup', () => {
   state.dragMode = null;
   state.dragCanvas = null;
+  stopNotePreview();
 });
+
+window.addEventListener('blur', stopNotePreview);
 
 state.timelineSec = 8;
 state.trimStart = 0;
