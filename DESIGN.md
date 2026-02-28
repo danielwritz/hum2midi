@@ -43,8 +43,8 @@ Capture a sung/hummed melody quickly and convert it into editable MIDI with mini
 - Octave transpose controls
 
 ### Playback
-- WebAudio oscillator playback for quick monitoring
-- Instrument selection via oscillator waveform
+- WebAudio synthesis playback for quick monitoring
+- Instrument presets: keyboard, piano, trumpet, flute, bass, drums
 
 ### MIDI Export
 - Build SMF (format 0) in browser

@@ -6,7 +6,7 @@ const trimStartLabelEl = document.getElementById('trimStartLabel');
 const trimEndLabelEl = document.getElementById('trimEndLabel');
 const convertBtn = document.getElementById('convertBtn');
 const bpmEl = document.getElementById('bpm');
-const waveformEl = document.getElementById('waveform');
+const instrumentEl = document.getElementById('waveform');
 const playBtn = document.getElementById('playBtn');
 const stopBtn = document.getElementById('stopBtn');
 const octaveUpBtn = document.getElementById('octaveUpBtn');
@@ -40,6 +40,7 @@ const state = {
   dragOffsetX: 0,
   playingNodes: [],
   playingTimeouts: [],
+  noiseBuffer: null,
 };
 
 function noteNameFromMidi(midi) {
@@ -316,6 +317,230 @@ function stopPlayback() {
   state.playingNodes.length = 0;
 }
 
+function instrumentGain(note, scale = 1) {
+  return clamp(((note.velocity || 96) / 127) * scale, 0.03, 1);
+}
+
+function getNoiseBuffer() {
+  if (state.noiseBuffer) return state.noiseBuffer;
+  const length = state.audioCtx.sampleRate;
+  const buffer = state.audioCtx.createBuffer(1, length, state.audioCtx.sampleRate);
+  const data = buffer.getChannelData(0);
+  for (let i = 0; i < length; i++) {
+    data[i] = Math.random() * 2 - 1;
+  }
+  state.noiseBuffer = buffer;
+  return buffer;
+}
+
+function addPlaybackNode(node) {
+  state.playingNodes.push(node);
+  return node;
+}
+
+function scheduleDrumHit(note, now) {
+  const audioCtx = state.audioCtx;
+  const start = now + note.start;
+  const hit = Math.abs(note.midi) % 3;
+  const level = instrumentGain(note, 0.75);
+
+  if (hit === 0) {
+    const osc = addPlaybackNode(audioCtx.createOscillator());
+    const gain = addPlaybackNode(audioCtx.createGain());
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(170, start);
+    osc.frequency.exponentialRampToValueAtTime(48, start + 0.14);
+    gain.gain.setValueAtTime(level, start);
+    gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.16);
+    osc.connect(gain).connect(audioCtx.destination);
+    osc.start(start);
+    osc.stop(start + 0.18);
+    return;
+  }
+
+  const noise = addPlaybackNode(audioCtx.createBufferSource());
+  const noiseFilter = addPlaybackNode(audioCtx.createBiquadFilter());
+  const noiseGain = addPlaybackNode(audioCtx.createGain());
+  noise.buffer = getNoiseBuffer();
+  noiseFilter.type = hit === 1 ? 'highpass' : 'bandpass';
+  noiseFilter.frequency.value = hit === 1 ? 1600 : 7000;
+  noiseFilter.Q.value = hit === 1 ? 0.7 : 0.9;
+
+  const decay = hit === 1 ? 0.16 : 0.05;
+  noiseGain.gain.setValueAtTime(level * (hit === 1 ? 0.7 : 0.45), start);
+  noiseGain.gain.exponentialRampToValueAtTime(0.0001, start + decay);
+
+  noise.connect(noiseFilter).connect(noiseGain).connect(audioCtx.destination);
+  noise.start(start);
+  noise.stop(start + decay + 0.02);
+
+  if (hit === 1) {
+    const tone = addPlaybackNode(audioCtx.createOscillator());
+    const toneGain = addPlaybackNode(audioCtx.createGain());
+    tone.type = 'triangle';
+    tone.frequency.setValueAtTime(190, start);
+    toneGain.gain.setValueAtTime(level * 0.16, start);
+    toneGain.gain.exponentialRampToValueAtTime(0.0001, start + 0.12);
+    tone.connect(toneGain).connect(audioCtx.destination);
+    tone.start(start);
+    tone.stop(start + 0.13);
+  }
+}
+
+function scheduleInstrumentNote(note, now, instrument) {
+  const audioCtx = state.audioCtx;
+  const start = now + note.start;
+  const duration = Math.max(0.06, note.duration);
+  const release = 0.16;
+  const end = start + duration;
+  const freq = midiToHz(note.midi);
+
+  if (instrument === 'drums') {
+    scheduleDrumHit(note, now);
+    return;
+  }
+
+  const out = addPlaybackNode(audioCtx.createGain());
+  out.gain.setValueAtTime(0.0001, start);
+  out.connect(audioCtx.destination);
+
+  if (instrument === 'keyboard') {
+    const oscA = addPlaybackNode(audioCtx.createOscillator());
+    const oscB = addPlaybackNode(audioCtx.createOscillator());
+    const filter = addPlaybackNode(audioCtx.createBiquadFilter());
+    filter.type = 'lowpass';
+    filter.frequency.value = 2800;
+    filter.Q.value = 0.7;
+
+    oscA.type = 'triangle';
+    oscA.frequency.setValueAtTime(freq, start);
+    oscB.type = 'sine';
+    oscB.frequency.setValueAtTime(freq * 2, start);
+
+    out.gain.linearRampToValueAtTime(instrumentGain(note, 0.34), start + 0.01);
+    out.gain.exponentialRampToValueAtTime(0.0001, end + release);
+
+    oscA.connect(filter);
+    oscB.connect(filter);
+    filter.connect(out);
+
+    oscA.start(start);
+    oscB.start(start);
+    oscA.stop(end + release + 0.02);
+    oscB.stop(end + release + 0.02);
+    return;
+  }
+
+  if (instrument === 'piano') {
+    const base = addPlaybackNode(audioCtx.createOscillator());
+    const harmon = addPlaybackNode(audioCtx.createOscillator());
+    const sparkle = addPlaybackNode(audioCtx.createOscillator());
+
+    base.type = 'triangle';
+    harmon.type = 'sine';
+    sparkle.type = 'triangle';
+    base.frequency.setValueAtTime(freq, start);
+    harmon.frequency.setValueAtTime(freq * 2, start);
+    sparkle.frequency.setValueAtTime(freq * 3.01, start);
+
+    out.gain.linearRampToValueAtTime(instrumentGain(note, 0.32), start + 0.003);
+    out.gain.exponentialRampToValueAtTime(0.00025, end + 0.22);
+
+    base.connect(out);
+    harmon.connect(out);
+    sparkle.connect(out);
+
+    base.start(start);
+    harmon.start(start);
+    sparkle.start(start);
+    base.stop(end + 0.24);
+    harmon.stop(end + 0.24);
+    sparkle.stop(end + 0.24);
+    return;
+  }
+
+  if (instrument === 'trumpet') {
+    const oscA = addPlaybackNode(audioCtx.createOscillator());
+    const oscB = addPlaybackNode(audioCtx.createOscillator());
+    const filter = addPlaybackNode(audioCtx.createBiquadFilter());
+    filter.type = 'bandpass';
+    filter.frequency.value = Math.min(2200, Math.max(650, freq * 2));
+    filter.Q.value = 1.1;
+
+    oscA.type = 'sawtooth';
+    oscB.type = 'square';
+    oscA.frequency.setValueAtTime(freq, start);
+    oscB.frequency.setValueAtTime(freq * 1.006, start);
+
+    out.gain.linearRampToValueAtTime(instrumentGain(note, 0.2), start + 0.045);
+    out.gain.setValueAtTime(instrumentGain(note, 0.18), end - Math.min(0.08, duration / 3));
+    out.gain.linearRampToValueAtTime(0.0001, end + 0.08);
+
+    oscA.connect(filter);
+    oscB.connect(filter);
+    filter.connect(out);
+
+    oscA.start(start);
+    oscB.start(start);
+    oscA.stop(end + 0.1);
+    oscB.stop(end + 0.1);
+    return;
+  }
+
+  if (instrument === 'flute') {
+    const oscA = addPlaybackNode(audioCtx.createOscillator());
+    const oscB = addPlaybackNode(audioCtx.createOscillator());
+    const filter = addPlaybackNode(audioCtx.createBiquadFilter());
+    filter.type = 'lowpass';
+    filter.frequency.value = 2400;
+    filter.Q.value = 0.4;
+
+    oscA.type = 'sine';
+    oscB.type = 'triangle';
+    oscA.frequency.setValueAtTime(freq, start);
+    oscB.frequency.setValueAtTime(freq * 2, start);
+
+    out.gain.linearRampToValueAtTime(instrumentGain(note, 0.23), start + 0.03);
+    out.gain.setValueAtTime(instrumentGain(note, 0.2), end - Math.min(0.08, duration / 2));
+    out.gain.linearRampToValueAtTime(0.0001, end + 0.14);
+
+    oscA.connect(filter);
+    oscB.connect(filter);
+    filter.connect(out);
+
+    oscA.start(start);
+    oscB.start(start);
+    oscA.stop(end + 0.16);
+    oscB.stop(end + 0.16);
+    return;
+  }
+
+  const bassA = addPlaybackNode(audioCtx.createOscillator());
+  const bassB = addPlaybackNode(audioCtx.createOscillator());
+  const bassFilter = addPlaybackNode(audioCtx.createBiquadFilter());
+  bassFilter.type = 'lowpass';
+  bassFilter.frequency.value = 620;
+  bassFilter.Q.value = 0.9;
+
+  bassA.type = 'square';
+  bassB.type = 'sine';
+  bassA.frequency.setValueAtTime(freq * 0.5, start);
+  bassB.frequency.setValueAtTime(freq, start);
+
+  out.gain.linearRampToValueAtTime(instrumentGain(note, 0.3), start + 0.012);
+  out.gain.setValueAtTime(instrumentGain(note, 0.22), end - Math.min(0.08, duration / 2));
+  out.gain.linearRampToValueAtTime(0.0001, end + 0.12);
+
+  bassA.connect(bassFilter);
+  bassB.connect(bassFilter);
+  bassFilter.connect(out);
+
+  bassA.start(start);
+  bassB.start(start);
+  bassA.stop(end + 0.14);
+  bassB.stop(end + 0.14);
+}
+
 function getTrimmedNotes() {
   const start = state.trimStart;
   const end = state.trimEnd;
@@ -343,23 +568,10 @@ async function playNotes() {
   stopPlayback();
 
   const now = state.audioCtx.currentTime + 0.05;
-  const wave = waveformEl.value;
+  const instrument = instrumentEl.value;
 
   for (const note of getTrimmedNotes()) {
-    const osc = state.audioCtx.createOscillator();
-    const gain = state.audioCtx.createGain();
-    osc.type = wave;
-    osc.frequency.value = midiToHz(note.midi);
-
-    gain.gain.setValueAtTime(0, now + note.start);
-    gain.gain.linearRampToValueAtTime(0.14, now + note.start + 0.01);
-    gain.gain.linearRampToValueAtTime(0.12, now + note.start + Math.max(0.02, note.duration - 0.03));
-    gain.gain.linearRampToValueAtTime(0, now + note.start + note.duration);
-
-    osc.connect(gain).connect(state.audioCtx.destination);
-    osc.start(now + note.start);
-    osc.stop(now + note.start + note.duration + 0.03);
-    state.playingNodes.push(osc, gain);
+    scheduleInstrumentNote(note, now, instrument);
   }
 }
 

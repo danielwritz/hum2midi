@@ -16,7 +16,7 @@ Turn humming/whistling into editable MIDI.
 - Convert trimmed audio-pitch frames into quantized note events
 - Piano roll with direct note drag/move and resize
 - Octave shift controls
-- Playback with selectable oscillator instrument
+- Playback with selectable instrument presets (keyboard, piano, trumpet, flute, bass, drums)
 - Export to `.mid`
 
 ## Run
@@ -35,4 +35,4 @@ Open [index.html](index.html) in a browser.
 - Add smoothing/denoise pass before note conversion
 - Add snap grid controls (1/8, 1/16, triplets)
 - Add project save/load JSON and import MIDI
-- Add robust instrument layer (SoundFont/WebAudio samples)
+- Add richer sampled instruments (SoundFont/WebAudio samples)
